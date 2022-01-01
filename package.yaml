@@ -3,6 +3,10 @@ name:                libhydrogen
 dependencies:
 - base >= 4.7 && < 5
 
+ghc-options:
+- -Weverything
+- -Werror
+
 library:
   source-dirs: src
   c-sources:
