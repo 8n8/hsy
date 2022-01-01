@@ -1,0 +1,31 @@
+name:                libhydrogen
+
+dependencies:
+- base >= 4.7 && < 5
+
+library:
+  source-dirs: src
+  c-sources:
+    - src/hydrogen.c
+
+executables:
+  libhydrogen-exe:
+    main:                Main.hs
+    source-dirs:         app
+    ghc-options:
+    - -threaded
+    - -rtsopts
+    - -with-rtsopts=-N
+    dependencies:
+    - libhydrogen
+
+tests:
+  libhydrogen-test:
+    main:                Spec.hs
+    source-dirs:         test
+    ghc-options:
+    - -threaded
+    - -rtsopts
+    - -with-rtsopts=-N
+    dependencies:
+    - libhydrogen
