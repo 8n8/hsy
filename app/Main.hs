@@ -1,9 +1,16 @@
-module Main where
+module Main (main) where
 
-import Lib
+import qualified Hsy
 
 main :: IO ()
 main =
     do
-    res <- hydro_init
-    print res
+    res <- Hsy.initialize
+    case res of
+        Left err ->
+            print err
+
+        Right ok ->
+            do
+            keypair <- Hsy.kxKeygen ok
+            print keypair

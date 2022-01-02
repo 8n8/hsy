@@ -1,4 +1,4 @@
-name:                libhydrogen
+name:                hsy
 
 dependencies:
 - base >= 4.7 && < 5
@@ -6,14 +6,24 @@ dependencies:
 ghc-options:
 - -Weverything
 - -Werror
+- -Wno-prepositive-qualified-module
+- -Wno-implicit-prelude
+- -Wno-missing-safe-haskell-mode
+- -Wno-safe
+- -Wno-unsafe
+- -Wno-missing-deriving-strategies
 
 library:
   source-dirs: src
   c-sources:
     - src/hydrogen.c
+    - src/wrappers.c
+  dependencies:
+    - memory
+
 
 executables:
-  libhydrogen-exe:
+  hsy-exe:
     main:                Main.hs
     source-dirs:         app
     ghc-options:
@@ -21,10 +31,10 @@ executables:
     - -rtsopts
     - -with-rtsopts=-N
     dependencies:
-    - libhydrogen
+    - hsy
 
 tests:
-  libhydrogen-test:
+  hsydrogen-test:
     main:                Spec.hs
     source-dirs:         test
     ghc-options:
@@ -32,4 +42,4 @@ tests:
     - -rtsopts
     - -with-rtsopts=-N
     dependencies:
-    - libhydrogen
+    - hsydrogen
