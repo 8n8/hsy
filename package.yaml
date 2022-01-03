@@ -12,6 +12,7 @@ ghc-options:
 - -Wno-safe
 - -Wno-unsafe
 - -Wno-missing-deriving-strategies
+- -Wno-missed-specialisations
 
 library:
   source-dirs: src
@@ -19,7 +20,8 @@ library:
     - src/hydrogen.c
     - src/wrappers.c
   dependencies:
-    - memory
+    - bytestring
+    - text
 
 
 executables:
