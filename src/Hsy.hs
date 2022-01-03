@@ -6,6 +6,8 @@ module Hsy
     ( initialize
     , kxKeygen
     , kxKk1
+    , kxKk2
+    , kxKk3
     , bin2hex
     , InitError
     , InitOk
@@ -34,6 +36,31 @@ foreign import capi "wrappers.h hydro_kx_kk_1_wrap"
         -> F.Ptr Fc.CChar -- Peer public key
         -> F.Ptr Fc.CChar -- Public static key
         -> F.Ptr Fc.CChar -- Secret static key
+        -> Fc.CInt
+
+foreign import capi "wrappers.h hydro_kx_kk_2_wrap"
+    hydro_kx_kk_2
+        :: F.Ptr Fc.CChar -- RX session key
+        -> F.Ptr Fc.CChar -- TX session key
+        -> F.Ptr Fc.CChar -- packet 2
+        -> F.Ptr Fc.CChar -- packet 1
+        -> F.Ptr Fc.CChar -- peer static public key
+        -> F.Ptr Fc.CChar -- my public static key
+        -> F.Ptr Fc.CChar -- my secret static key
+        -> Fc.CInt
+
+foreign import capi "wrappers.h hydro_kx_kk_3_wrap"
+    hydro_kx_kk_3
+        :: F.Ptr Fc.CChar -- ephemeral public key
+        -> F.Ptr Fc.CChar -- ephemeral secret key
+        -> F.Ptr Fc.CUInt -- hash state state
+        -> Fc.CChar -- hash state buffer offset
+        -> F.Ptr Fc.CChar -- hash state alignment
+        -> F.Ptr Fc.CChar -- RX session key
+        -> F.Ptr Fc.CChar -- TX session key
+        -> F.Ptr Fc.CChar -- packet 2
+        -> F.Ptr Fc.CChar -- my public static key
+        -> F.Ptr Fc.CChar -- my secret static key
         -> Fc.CInt
 
 
@@ -116,6 +143,147 @@ newtype KxKkPacket1
     = KxKkPacket1 B.ByteString
 
 
+instance Encodable KxKkPacket1 where
+    encode (KxKkPacket1 p) =
+        p
+
+
+data KxSessionKeypair
+    = KxSessionKeypair RxSessionKey TxSessionKey
+
+
+newtype KxKkPacket2
+    = KxKkPacket2 B.ByteString
+
+
+instance Encodable KxKkPacket2 where
+    encode (KxKkPacket2 b) = b
+
+
+newtype TxSessionKey
+    = TxSessionKey B.ByteString
+
+
+newtype RxSessionKey
+    = RxSessionKey B.ByteString
+
+
+getBufOff :: HashState -> Data.Word.Word8
+getBufOff (HashState _ (HashStateBufOff b) _) =
+    b
+
+
+getHashStateAlign :: HashState -> B.ByteString
+getHashStateAlign (HashState _ _ (HashStateAlign b)) =
+    b
+
+
+getHashStateState :: HashState -> [Data.Word.Word32]
+getHashStateState (HashState (HashStateState hs) _ _) =
+    hs
+
+
+kxKk3
+    :: InitOk
+    -> KxState
+    -> KxKkPacket2
+    -> KxKeypair
+    -> Maybe KxSessionKeypair
+kxKk3 _ (KxState ephemeral hashState) packet2 keypair =
+    System.IO.Unsafe.unsafePerformIO $
+    B.useAsCStringLen (encode (kxGetPublic ephemeral)) $
+        \(pubEphPtr, _) ->
+    B.useAsCStringLen (encode (kxGetSecret ephemeral)) $
+        \(secEphPtr, _) ->
+    Fa.withArray (map fromIntegral $ getHashStateState hashState) $
+        \hashStateStatePtr ->
+    B.useAsCStringLen (getHashStateAlign hashState) $
+        \(hashStateAlignPtr, _) ->
+    F.allocaBytes kxSessionKeyBytes $ \rxKeyPtr ->
+    F.allocaBytes kxSessionKeyBytes $ \txKeyPtr ->
+    B.useAsCStringLen (encode packet2) $ \(packet2Ptr, _) ->
+    B.useAsCStringLen (encode (kxGetPublic keypair)) $
+        \(myPublicStaticPtr, _) ->
+    B.useAsCStringLen (encode (kxGetSecret keypair)) $
+        \(mySecretStaticPtr, _) ->
+
+    let
+    result =
+        hydro_kx_kk_3
+            pubEphPtr
+            secEphPtr
+            hashStateStatePtr
+            (fromIntegral $ getBufOff hashState)
+            hashStateAlignPtr
+            rxKeyPtr
+            txKeyPtr
+            packet2Ptr
+            myPublicStaticPtr
+            mySecretStaticPtr
+    in
+    if result == 0 then
+    do
+    rxSessionKey <-
+        B.packCStringLen (rxKeyPtr, kxSessionKeyBytes)
+    txSessionKey <-
+        B.packCStringLen (txKeyPtr, kxSessionKeyBytes)
+    return $
+        Just $
+        KxSessionKeypair
+        (RxSessionKey rxSessionKey)
+        (TxSessionKey txSessionKey)
+
+    else
+    return Nothing
+
+
+kxKk2
+    :: InitOk
+    -> KxKkPacket1
+    -> KxPublicKey
+    -> KxKeypair
+    -> IO (Maybe (KxKkPacket2, KxSessionKeypair))
+kxKk2 _ packet1 publicKey keypair =
+    F.allocaBytes kxSessionKeyBytes $ \rxSessionKeyPtr ->
+    F.allocaBytes kxSessionKeyBytes $ \txSessionKeyPtr ->
+    F.allocaBytes kxKkPacket2Bytes $ \packet2Ptr ->
+    B.useAsCStringLen (encode packet1) $ \(packet1Ptr, _) ->
+    B.useAsCStringLen (encode publicKey) $ \(peerPublicPtr, _) ->
+    B.useAsCStringLen (encode (kxGetPublic keypair)) $
+        \(myPublicStaticPtr, _) ->
+    B.useAsCStringLen (encode (kxGetSecret keypair)) $
+        \(mySecretStaticPtr, _) ->
+
+    let
+    result =
+        hydro_kx_kk_2
+            rxSessionKeyPtr
+            txSessionKeyPtr
+            packet2Ptr
+            packet1Ptr
+            peerPublicPtr
+            myPublicStaticPtr
+            mySecretStaticPtr
+    in
+    if result == 0 then
+    do
+    rxSessionKey <-
+        B.packCStringLen (rxSessionKeyPtr, kxSessionKeyBytes)
+    txSessionKey <-
+        B.packCStringLen (txSessionKeyPtr, kxSessionKeyBytes)
+    packet2 <-
+        B.packCStringLen (packet2Ptr, kxKkPacket2Bytes)
+    return $
+        Just
+        ( KxKkPacket2 packet2
+        , KxSessionKeypair
+            (RxSessionKey rxSessionKey)
+            (TxSessionKey txSessionKey)
+        )
+    else
+        return Nothing
+
+
 kxKk1
     :: InitOk
     -> KxPublicKey
@@ -134,50 +302,50 @@ kxKk1 _ publicKey keypair =
     B.useAsCStringLen (encode ( kxGetSecret keypair)) $
         \(mySecretStaticPtr, _) ->
 
-        let
-        result =
-            hydro_kx_kk_1
-                publicEphemeralPtr
-                secretEphemeralPtr
-                hashStateStatePtr
-                hashStateBufOffPtr
-                hashStateAlignPtr
-                packet1Ptr
-                peerPublicPtr
-                myPublicStaticPtr
-                mySecretStaticPtr
-        in
-        if result == 0 then
-            do
-            publicEphemeral <-
-                B.packCStringLen (publicEphemeralPtr, kxPublicKeyBytes)
-            secretEphemeral <-
-                B.packCStringLen (secretEphemeralPtr, kxSecretKeyBytes)
-            hashStateState <- Fa.peekArray 12 hashStateStatePtr
+    let
+    result =
+        hydro_kx_kk_1
+            publicEphemeralPtr
+            secretEphemeralPtr
+            hashStateStatePtr
+            hashStateBufOffPtr
+            hashStateAlignPtr
+            packet1Ptr
+            peerPublicPtr
+            myPublicStaticPtr
+            mySecretStaticPtr
+    in
+    if result == 0 then
+    do
+    publicEphemeral <-
+        B.packCStringLen (publicEphemeralPtr, kxPublicKeyBytes)
+    secretEphemeral <-
+        B.packCStringLen (secretEphemeralPtr, kxSecretKeyBytes)
+    hashStateState <- Fa.peekArray 12 hashStateStatePtr
 
-            hashStateBufOff <-
-                Foreign.Storable.peek hashStateBufOffPtr
-            hashStateAlign <- B.packCStringLen (hashStateAlignPtr, 3)
-            packet1 <- B.packCStringLen (packet1Ptr, kxKkPacket1Bytes)
-            let
-                ephemeralKp =
-                    KxKeypair
-                        (KxPublicKey publicEphemeral)
-                        (KxSecretKey secretEphemeral)
-                hashState =
-                    HashState
-                        (HashStateState $
-                            map fromIntegral hashStateState)
-                        (HashStateBufOff $
-                            fromIntegral hashStateBufOff)
-                        (HashStateAlign hashStateAlign)
-            return $
-                Just
-                    ( KxKkPacket1 packet1
-                    , KxState ephemeralKp hashState
-                    )
-        else
-            return Nothing
+    hashStateBufOff <-
+        Foreign.Storable.peek hashStateBufOffPtr
+    hashStateAlign <- B.packCStringLen (hashStateAlignPtr, 3)
+    packet1 <- B.packCStringLen (packet1Ptr, kxKkPacket1Bytes)
+    let
+        ephemeralKp =
+            KxKeypair
+                (KxPublicKey publicEphemeral)
+                (KxSecretKey secretEphemeral)
+        hashState =
+            HashState
+                (HashStateState $
+                    map fromIntegral hashStateState)
+                (HashStateBufOff $
+                    fromIntegral hashStateBufOff)
+                (HashStateAlign hashStateAlign)
+    return $
+        Just
+        ( KxKkPacket1 packet1
+        , KxState ephemeralKp hashState
+        )
+    else
+    return Nothing
 
 
 foreign import capi "hydrogen.h hydro_init"
@@ -266,6 +434,24 @@ foreign import capi "hydrogen.h value hydro_kx_KK_PACKET1BYTES"
 kxKkPacket1Bytes :: Int
 kxKkPacket1Bytes =
     fromIntegral hydro_kx_KK_PACKET1BYTES
+
+
+foreign import capi "hydrogen.h value hydro_kx_KK_PACKET2BYTES"
+    hydro_kx_KK_PACKET2BYTES :: Fc.CInt
+
+
+kxKkPacket2Bytes :: Int
+kxKkPacket2Bytes =
+    fromIntegral hydro_kx_KK_PACKET2BYTES
+
+
+foreign import capi "hydrogen.h value hydro_kx_SESSIONKEYBYTES"
+    hydro_kx_SESSIONKEYBYTES :: Fc.CInt
+
+
+kxSessionKeyBytes :: Int
+kxSessionKeyBytes =
+    fromIntegral hydro_kx_SESSIONKEYBYTES
 
 
 data InitOk
