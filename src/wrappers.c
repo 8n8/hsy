@@ -13,6 +13,30 @@ void hydro_kx_keygen_wrap(
 }
 
 
+int hydro_kx_xx_1_wrap(
+    uint8_t pk_ephemeral[hydro_kx_PUBLICKEYBYTES],
+    uint8_t sk_ephemeral[hydro_kx_SECRETKEYBYTES],
+    uint32_t hash_state_state[12],
+    uint8_t* hash_state_buf_off,
+    uint8_t hash_state_align[3],
+    uint8_t packet1[hydro_kx_XX_PACKET1BYTES]) {
+
+    hydro_kx_state state;
+    int ret = hydro_kx_xx_1(&state, packet1, NULL);
+    if (ret != 0) {
+        return ret;
+    }
+
+    memcpy(pk_ephemeral, state.eph_kp.pk, hydro_kx_PUBLICKEYBYTES);
+    memcpy(sk_ephemeral, state.eph_kp.sk, hydro_kx_SECRETKEYBYTES);
+    memcpy(hash_state_state, state.h_st.state, 12*4);
+    *hash_state_buf_off = state.h_st.buf_off;
+    memcpy(hash_state_align, state.h_st.align, 3);
+
+    return 0;
+}
+
+
 int hydro_kx_kk_2_wrap(
     uint8_t rx_session[hydro_kx_SESSIONKEYBYTES],
     uint8_t tx_session[hydro_kx_SESSIONKEYBYTES],
